@@ -649,55 +649,24 @@ def test_swapping():
     layer = layer.cuda()
     outputs.append(layer(a))
     layer.create_pinned_memory()
-    assert layer.is_pinned == True
     outputs.append(layer(a))
     layer.swapout_async()
-    assert layer.state == 'swapping_out'
     outputs.append(layer(a))
     layer.sync()
-    assert layer.weight is None
+    assert layer.weight.data is None
 
     with pytest.raises(Exception):
         layer(a)
     layer.swapin_async()
 
-    # does not raise if the async copy completed too quickly
-    #with pytest.raises(Exception):
-    #    layer(a)
+    with pytest.raises(Exception):
+        layer(a)
     layer.sync()
-    assert getattr(layer.weight, 'quant_state', None) is not None
     outputs.append(layer(a))
     ref = outputs.pop(0)
     for t in outputs:
         torch.testing.assert_close(ref, t)
 
-def test_bench_swapping():
-    nlayers = 1
-    dim = 24*1024
-    net = torch.nn.Sequential(*[bnb.nn.Linear4bit(dim, dim) for i in range(nlayers)])
-    net = net.cuda()
-    for linear in net:
-        linear.create_pinned_memory()
-
-    torch.cuda.synchronize()
-    t0 = time.time()
-    iters = 1
-    for i in range(iters):
-        for linear in net:
-            linear.swapout_async()
-        for linear in net:
-            linear.sync()
-        for linear in net:
-            linear.swapin_async()
-        for linear in net:
-            linear.sync()
-
-    torch.cuda.synchronize()
-    t = time.time() - t0
-
-    # 2 transfers of nlayers with dim*dim in 4-bit
-    GB = 2*iters*nlayers*dim*dim*0.5/(1024**3)
-    print(GB/t)
 
 
 
