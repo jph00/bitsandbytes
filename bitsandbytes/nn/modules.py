@@ -157,6 +157,10 @@ class Params4bit(torch.nn.Parameter):
         self.pre_swap_device = None
         self.state = 'idle'
         self.stream = None
+        self.create_pinned_memory = cls.create_pinned_memory
+        self.swapout_async = cls.swapout_async
+        self.swapin_async = cls.swapin_async
+        self.sync = cls.sync
         return self
 
     @classmethod
@@ -177,7 +181,7 @@ class Params4bit(torch.nn.Parameter):
 
         return self
 
-    def create_pinned_memory()
+    def create_pinned_memory(self):
         if self.pinned_param is None and self.data.type == 'cuda':
             self.pinned_param = self.data.pin_memory()
             self.is_pinned = True
