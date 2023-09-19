@@ -1,8 +1,7 @@
-from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Optional
-
 import torch
-from torch.nn import Module
+
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 
 def detach_tensors_or_pass_value(value: Any) -> Any:
@@ -126,96 +125,3 @@ def display_quantization(start: float, stop: float, increment: float, maxq: int)
 
     print(f'{scale = }\n{zero = }\n{to_quantize = }\n{quantized = }')
     return list(zip(to_quantize, scaled, quantized))
-
-
-def list_layers(model, indent=0):
-    """Recursively list all layer types in a PyTorch model."""
-    for name, module in model.named_children():
-        # Check if the module has any parameters that require gradients
-        requires_grad = any(param.requires_grad for param in module.parameters())
-
-        print(
-            "    " * indent, name, ":",
-            type(module).__name__, f"- {requires_grad = }")
-
-        # Recursively list the layers for child modules
-        if isinstance(module, torch.nn.Module):
-            list_layers(module, indent + 1)
-
-
-def list_layers_and_parameters(
-        model: Module,
-        indent: int = 0,
-        non_leaf_params: Optional[Dict[str, str]] = None) -> None:
-    """
-    Recursively list all layer types and their parameters in a PyTorch model.
-    
-    Parameters:
-        model (Module): The PyTorch model to explore.
-        indent (int): Indentation level for printing.
-        non_leaf_params (Dict[str, str]): Dictionary to collect non-leaf node parameters.
-    """
-    if non_leaf_params is None:
-        non_leaf_params = {}
-
-    for name, module in model.named_children():
-        print("    " * indent, name, ":", type(module).__name__)
-
-        for param_name, param in module.named_parameters():
-            param_is_local_to_module = '.' not in param_name
-
-            if param_is_local_to_module:
-                non_leaf_params[
-                    f"{name}.{param_name}"] = f"{param.requires_grad=}, {param.dtype=}, {param.shape=}"
-                print(
-                    "    " * (indent + 1), param_name,
-                    f"- {param.requires_grad=}, {param.dtype=}")
-
-        # Recursively list the layers and parameters for child modules
-        if isinstance(module, torch.nn.Module):
-            list_layers_and_parameters(module, indent + 1, non_leaf_params)
-
-    if indent == 0:
-        print("\n\n\nNon-leaf node parameters:")
-        for param_name, properties in non_leaf_params.items():
-            print("    ", param_name, "-", properties)
-
-
-def list_cuda_devices():
-    """List all available CUDA devices, with id and device names."""
-    if torch.cuda.is_available():
-        # Get the total number of available CUDA devices
-        num_cuda_devices = torch.cuda.device_count()
-
-        # Iterate through each CUDA device and print its name
-        for i in range(num_cuda_devices):
-            print(f"CUDA Device {i}: {torch.cuda.get_device_name(i)}")
-    else:
-        print("No CUDA devices available.")
-
-
-import functools
-
-
-def debug(func):
-    """Print the function signature and return value."""
-
-    def format_arg(arg):
-        if isinstance(arg, bool):
-            return str(arg)
-        elif isinstance(arg, int):
-            return f"{arg:,}"
-        else:
-            return repr(arg)
-
-    @functools.wraps(func)
-    def wrapper_debug(*args, **kwargs):
-        args_repr = [format_arg(a) for a in args]
-        kwargs_repr = [f"{k}={format_arg(v)}" for k, v in kwargs.items()]
-        signature = ",\n".join(args_repr + kwargs_repr)
-        print(f"{func.__name__}({signature})")
-        value = func(*args, **kwargs)
-        print(f"returned {format_arg(value)}\n\n")
-        return value
-
-    return wrapper_debug
