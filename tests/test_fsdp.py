@@ -46,7 +46,7 @@ def fsdp_main(rank, world_size, optim_bits):
 
     # model_fsdp = FSDP(SimpleModel(), # HierarchicalModel(), 
     #     auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
-      
+
     # model_fsdp = SimpleModel()
     low_cpu_fsdp = False
     if low_cpu_fsdp:
@@ -57,15 +57,14 @@ def fsdp_main(rank, world_size, optim_bits):
                 model_fsdp = MoreComplexModel()
     else:
         model_fsdp = MoreComplexModel()
-          
+
     from torch.distributed.fsdp.wrap import enable_wrap, wrap
     with enable_wrap(
         wrapper_cls=FSDP,
-        **{
-            'device_id' : rank,
-            'sync_module_states' : True,
-            'ignored_states': [model_fsdp.block1.layer2, model_fsdp.block2.layer2],
-        }):
+        device_id=rank,
+        sync_module_states=True,
+        ignored_states=[model_fsdp.block1.layer2, model_fsdp.block2.layer2]
+    ):
         model_fsdp.block1.layer1 = wrap(model_fsdp.block1.layer1)
         # model_fsdp.block1.layer2 = wrap(model_fsdp.block1.layer2)
         model_fsdp.block2.layer1 = wrap(model_fsdp.block2.layer1)
@@ -73,7 +72,7 @@ def fsdp_main(rank, world_size, optim_bits):
         model_fsdp = wrap(model_fsdp)
 
     model_fsdp = model_fsdp.to(rank)
-    
+
     if rank == 0:
         print(model_fsdp)
         print(f'{rank=}, {model_fsdp.block2.layer2.weight=}')
