@@ -165,6 +165,8 @@ class Params4bit(torch.nn.Parameter):
         return self
 
     def cuda(self, device):
+        if self.quant_state is not None:
+            return self
         w = self.data.contiguous().half().cuda(device)
         w_4bit, quant_state = bnb.functional.quantize_4bit(
             w,

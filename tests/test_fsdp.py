@@ -1,12 +1,17 @@
 import os
 from os.path import join
 import time
+from dataclasses import dataclass, field
+from typing import List
 
 from peft.peft_model import PeftModel
+from peft import get_peft_model, LoraConfig, TaskType
 import pytest
 from pytest_cases import case, parametrize_with_cases
 import torch
 import torch.distributed as dist
+
+from torch.distributed.fsdp import MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
 )
@@ -22,19 +27,36 @@ from bitsandbytes.nn import Linear4bit
 from bitsandbytes.utils import replace_linear
 
 from .models import HierarchicalModel, SimpleModel, MoreComplexModel, LoraDecoder
-
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from .fsdp_utils import fsdp_auto_wrap_policy
 
 def fsdp_main(rank, world_size, optim_bits):
+    peft_config = LoraConfig( r=8, lora_alpha=32, target_modules=("q_proj", "v_proj"), bias="none",
+        task_type= "CAUSAL_LM", lora_dropout=0.05, inference_mode= False)
+    def p0(x): print(x) if rank==0 else None
+
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12345'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.manual_seed(1337)
-
     torch.cuda.set_device(rank)
 
     # model_name = "huggyllama/llama-7b"
+    model_name = 'PY007/TinyLlama-1.1B-intermediate-step-480k-1T'
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model = replace_linear(model, Linear4bit)
+    model = get_peft_model(model, peft_config)
+    if rank==0: model.print_trainable_parameters()
+
+    wrapping_policy = fsdp_auto_wrap_policy(model, LlamaDecoderLayer)
+    model = FSDP(model, auto_wrap_policy=wrapping_policy,
+        device_id=torch.cuda.current_device(), limit_all_gathers=True,
+        mixed_precision=None, sync_module_states=False,)
+
+    p0(model)
+
     # adapters_name = 'timdettmers/qlora-flan-7b'
 
     # model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
@@ -44,58 +66,59 @@ def fsdp_main(rank, world_size, optim_bits):
     # model = PeftModel.from_pretrained(model, adapters_name)
     # AutoTokenizer.from_pretrained(model_name)
 
-    # model_fsdp = FSDP(SimpleModel(), # HierarchicalModel(), 
+    # model = FSDP(SimpleModel(), # HierarchicalModel(), 
     #     auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
 
-    # model_fsdp = SimpleModel()
+    # model = SimpleModel()
+    """
     low_cpu_fsdp = False
     if low_cpu_fsdp:
         if rank == 0:
-            model_fsdp = MoreComplexModel()
+            model = MoreComplexModel()
         else:
             with torch.device("meta"):
-                model_fsdp = MoreComplexModel()
+                model = MoreComplexModel()
     else:
-        model_fsdp = MoreComplexModel()
+        model = MoreComplexModel()
 
     from torch.distributed.fsdp.wrap import enable_wrap, wrap
     with enable_wrap(
         wrapper_cls=FSDP,
         device_id=rank,
         sync_module_states=True,
-        ignored_states=[model_fsdp.block1.layer2, model_fsdp.block2.layer2]
+        ignored_states=[model.block1.layer2, model.block2.layer2]
     ):
-        model_fsdp.block1.layer1 = wrap(model_fsdp.block1.layer1)
-        # model_fsdp.block1.layer2 = wrap(model_fsdp.block1.layer2)
-        model_fsdp.block2.layer1 = wrap(model_fsdp.block2.layer1)
-        # model_fsdp.block2.layer2 = wrap(model_fsdp.block2.layer2)
-        model_fsdp = wrap(model_fsdp)
+        model.block1.layer1 = wrap(model.block1.layer1)
+        # model.block1.layer2 = wrap(model.block1.layer2)
+        model.block2.layer1 = wrap(model.block2.layer1)
+        # model.block2.layer2 = wrap(model.block2.layer2)
+        model = wrap(model)
 
-    model_fsdp = model_fsdp.to(rank)
+    model = model.to(rank)
 
     if rank == 0:
-        print(model_fsdp)
-        print(f'{rank=}, {model_fsdp.block2.layer2.weight=}')
+        print(f'{rank=}, {model.block2.layer2.weight=}')
     if rank == 1:
-        print(f'{rank=}, {model_fsdp.block2.layer2.weight=}')
+        print(f'{rank=}, {model.block2.layer2.weight=}')
+    """
 
     # model_plain = HierarchicalModel()
-    # model_fsdp = FSDP(HierarchicalModel(), auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
+    # model = FSDP(HierarchicalModel(), auto_wrap_policy=bnb_fsdp_auto_wrap_policy)
     # print(f'{model_plain = }')
-    # print(f'{model_fsdp = }')
+    # print(f'{model = }')
 
     # model_plain = model_plain.to(rank)
-    # model_fsdp = model_fsdp.to(rank)
+    # model = model.to(rank)
 
     # betas = (0.99, 0.95)  # we have random labels, so the default is unstable
     # eps = 1e-7
     # optim = torch.optim.Adam(model_plain.parameters(), lr=0.0003, betas=betas, eps=eps)
     # if optim_bits == 8:
     #     optim8bit = bnb.optim.Adam8bit(
-    #         model_fsdp.parameters(), lr=0.0003, betas=betas, eps=eps)
+    #         model.parameters(), lr=0.0003, betas=betas, eps=eps)
     # elif optim_bits == 32:
     #     optim8bit = torch.optim.Adam(
-    #         model_fsdp.parameters(), lr=0.0003, betas=betas, eps=eps)
+    #         model.parameters(), lr=0.0003, betas=betas, eps=eps)
 
     # batches = torch.randn(num_batches, dim, requires_grad=True)
     # lbls = torch.randint(0, dim, size=(num_batches, ))
@@ -119,7 +142,7 @@ def fsdp_main(rank, world_size, optim_bits):
     #     loss_plain.backward()
     #     optim.step()
 
-    #     output_fsdp = model_fsdp(data2)
+    #     output_fsdp = model(data2)
     #     loss_fsdp = torch.nn.functional.cross_entropy(output_fsdp, lbl2).mean()
     #     loss_fsdp.backward()
 
@@ -152,6 +175,7 @@ def fsdp_main(rank, world_size, optim_bits):
 def test_fsdp_bnb(optim_bits):
     torch.manual_seed(1337)
     WORLD_SIZE = torch.cuda.device_count()
+    WORLD_SIZE = 2
     mp.spawn(fsdp_main, args=(WORLD_SIZE, optim_bits), nprocs=WORLD_SIZE, join=True)
 
 

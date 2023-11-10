@@ -47,7 +47,7 @@ class SimpleModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.block1 = CustomBlock(128, 256, four_bit=True)
-        
+
     def forward(self, x):
         return self.block1(x)
 
@@ -57,7 +57,7 @@ class MoreComplexModel(nn.Module):
         super().__init__()
         self.block1 = CustomBlock(128, 256, four_bit=True)
         self.block2 = CustomBlock(128, 256, four_bit=True)
-        
+
     def forward(self, x):
         x = self.block1(x)
         x = self.block2(x)
